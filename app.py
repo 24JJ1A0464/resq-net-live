@@ -84,7 +84,7 @@ with st.sidebar:
     st.write("**📝 Manually Report Incident:**")
     report_input = st.text_input("Report:", placeholder="e.g., Fire at Gachibowli")
     
-    if st.button("📢 Dispatch Team"):
+  if st.button("📢 Dispatch Team"):
         if report_input:
             dtype, lat, lon, loc_name = process_report(report_input)
             if lat:
@@ -97,8 +97,16 @@ with st.sidebar:
                     "Status": [False],
                     "Location": [loc_name]
                 })
+                # 1. Update the State
                 st.session_state.incident_data = pd.concat([st.session_state.incident_data, new_row], ignore_index=True)
+                
+                # 2. Show Success Message
                 st.success(f"✅ Dispatched: {dtype} at {loc_name}")
+                
+                # 3. FORCE REFRESH (The Fix)
+                time.sleep(1) # Wait 1s so user sees the "Success" message
+                st.rerun()
+                
             else:
                 st.error("❌ Location not found. Try 'Fire at [Place Name]'.")
 
@@ -176,3 +184,4 @@ with col2:
         st_folium(m, use_container_width=True, height=500)
     else:
         st.write("No active incidents.")
+
