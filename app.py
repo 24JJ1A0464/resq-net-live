@@ -3,168 +3,176 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
-from geopy.extra.rate_limiter import RateLimiter
-import re
+import os
+import time
 
-# 1. SETUP: Wide layout
+# 1. SETUP
 st.set_page_config(page_title="ResQ-Net Operations", layout="wide")
 st.title("ResQ-Net Live Operations 🚁")
 
-# 2. DATA: Initialize Session State
+# Database File (Created by agent.py on your laptop)
+DB_FILE = "live_incidents.csv"
+
+# 2. DATA LOADING (The Hybrid Logic)
 if 'incident_data' not in st.session_state:
-    st.session_state.incident_data = pd.DataFrame({
-        'ID': [101, 102],
-        'Type': ['Fire', 'Medical'],
-        'Latitude': [17.3616, 17.3900], # Charminar Coords
-        'Longitude': [78.4747, 78.4750],
-        'Status': [False, False], # False = Active
-        'Location': ['Charminar', 'Nampally']
-    })
+    # A. Check if the Agent is running (Laptop Mode)
+    if os.path.exists(DB_FILE):
+        try:
+            st.session_state.incident_data = pd.read_csv(DB_FILE)
+            st.toast("🔌 Connected to Autonomous Agent", icon="🤖")
+        except:
+            st.session_state.incident_data = pd.DataFrame(columns=["ID", "Type", "Title", "Latitude", "Longitude", "Status", "Location"])
+    # B. Fallback to Empty State (Cloud/Judge Mode)
+    else:
+        st.session_state.incident_data = pd.DataFrame({
+            'ID': [101, 102],
+            'Type': ['Fire', 'Medical'],
+            'Title': ['Manual Report', 'Manual Report'],
+            'Latitude': [17.3850, 17.4000],
+            'Longitude': [78.4867, 78.4900],
+            'Status': [False, False],
+            'Location': ['Charminar', 'Nampally']
+        })
 
-# --- INTELLIGENCE LAYER (Now with Noise Removal) ---
+# Auto-refresh logic (only if file exists)
+if os.path.exists(DB_FILE):
+    time.sleep(1)
+    st.rerun()
+
+# --- INTELLIGENCE LAYER (For Manual Input) ---
 def process_report(raw_text):
-    """
-    1. Detects Disaster Type.
-    2. Cleans text to find just the Location name.
-    3. Geocodes the clean location.
-    """
-    raw_text_lower = raw_text.lower()
+    geolocator = Nominatim(user_agent="resqnet_hybrid_v1")
+    noise_words = ["reported", "massive", "huge", "severe", "major", "fire", "flood", 
+                   "accident", "medical", "near", "at", "in", "hyderabad", "breaking"]
     
-    # A. Keyword Detection
-    detected_type = "General"
-    if "fire" in raw_text_lower or "flame" in raw_text_lower: detected_type = "Fire"
-    elif "flood" in raw_text_lower or "water" in raw_text_lower: detected_type = "Flood"
-    elif "medical" in raw_text_lower or "injured" in raw_text_lower: detected_type = "Medical"
-    elif "accident" in raw_text_lower or "crash" in raw_text_lower: detected_type = "Accident"
-    elif "collapse" in raw_text_lower: detected_type = "Collapse"
-
-    # B. Smart Text Cleaning (The FIX)
-    # Remove common "noise" words to isolate the location
-    noise_words = [
-        "massive", "reported", "near", "at", "huge", "severe", "major", 
-        "fire", "flood", "accident", "medical", "emergency", "help", "please"
-    ]
-    
-    clean_text = raw_text_lower
+    clean_text = raw_text.lower()
     for word in noise_words:
         clean_text = clean_text.replace(word, "")
-    
-    # Remove extra spaces and special chars
-    clean_text = clean_text.strip().replace("  ", " ")
-    
-    # C. Geocoding
-    geolocator = Nominatim(user_agent="resqnet_hackathon_agent_v2") # Updated User Agent
+    clean_text = clean_text.strip().split(" ")[0]
     
     try:
-        # Try finding the specific location + City
-        # We assume the user is in Hyderabad for the hackathon context
-        search_query = f"{clean_text}, Hyderabad"
-        location = geolocator.geocode(search_query)
-        
+        # Assume Hyderabad for the demo
+        location = geolocator.geocode(f"{clean_text}, Hyderabad")
         if location:
-            return detected_type, location.latitude, location.longitude, location.address
-        else:
-            return None, None, None, None
+            # Simple Type Detection
+            dtype = "General"
+            if "fire" in raw_text.lower(): dtype = "Fire"
+            elif "flood" in raw_text.lower(): dtype = "Flood"
+            elif "accident" in raw_text.lower(): dtype = "Accident"
+            elif "medical" in raw_text.lower(): dtype = "Medical"
+            
+            return dtype, location.latitude, location.longitude, clean_text.title()
     except:
         return None, None, None, None
+    return None, None, None, None
 
-# --- SIDEBAR: LIVE MONITORING CHANNEL ---
+# --- SIDEBAR (Always Active for Judges) ---
 with st.sidebar:
-    st.header("📡 Live Monitoring Channel")
-    st.info("💡 **Try these examples:**\n"
-        "- 'Fire at Charminar'\n"
-        "- 'Flood in Hitech City'\n"
-        "- 'Accident near Gachibowli'")
-    st.info("💡 Tip: You can now type full sentences!")
+    st.header("📡 Command Center")
     
-    # The Input for the Agent
-    report_input = st.text_area(
-        "Incoming Message:", 
-        placeholder="e.g., 'Massive fire reported near Golconda Fort'"
-    )
-    
-    if st.button("📢 ANALYZE & DISPATCH", type="primary"):
-        if report_input:
-            with st.spinner("🤖 AI Agent analyzing text..."):
-                # Run the AI logic
-                d_type, lat, lon, address = process_report(report_input)
-                
-                if lat and lon:
-                    # Add to database
-                    new_id = st.session_state.incident_data['ID'].max() + 1
-                    new_row = pd.DataFrame({
-                        'ID': [new_id],
-                        'Type': [d_type],
-                        'Latitude': [lat],
-                        'Longitude': [lon],
-                        'Status': [False],
-                        'Location': [address.split(",")[0]]
-                    })
-                    st.session_state.incident_data = pd.concat(
-                        [st.session_state.incident_data, new_row], ignore_index=True
-                    )
-                    st.success(f"✅ DISPATCHED: {d_type} team to {address.split(',')[0]}")
-                else:
-                    st.error(f"❌ Could not find location in: '{report_input}'. Try typing just the place name.")
+    # Mode Indicator
+    if os.path.exists(DB_FILE):
+        st.success("🟢 MODE: Autonomous Agent (Laptop)")
+        st.caption("Reading from live_incidents.csv")
+    else:
+        st.info("🔵 MODE: Manual / Cloud (Judges)")
+        st.caption("Agent script not detected. Manual entry enabled.")
 
-# 3. LAYOUT: Columns
+    st.divider()
+    
+    # Manual Entry Tool
+    st.write("**📝 Manually Report Incident:**")
+    report_input = st.text_input("Report:", placeholder="e.g., Fire at Gachibowli")
+    
+    if st.button("📢 Dispatch Team"):
+        if report_input:
+            dtype, lat, lon, loc_name = process_report(report_input)
+            if lat:
+                new_row = pd.DataFrame({
+                    "ID": [len(st.session_state.incident_data) + 101],
+                    "Type": [dtype],
+                    "Title": [report_input],
+                    "Latitude": [lat],
+                    "Longitude": [lon],
+                    "Status": [False],
+                    "Location": [loc_name]
+                })
+                st.session_state.incident_data = pd.concat([st.session_state.incident_data, new_row], ignore_index=True)
+                st.success(f"✅ Dispatched: {dtype} at {loc_name}")
+            else:
+                st.error("❌ Location not found. Try 'Fire at [Place Name]'.")
+
+# --- MAIN DASHBOARD LAYOUT ---
 col1, col2 = st.columns([1, 2], gap="medium")
 
-# --- LEFT: INCIDENT LIST ---
 with col1:
     st.subheader("📝 Incident Log")
-    edited_df = st.data_editor(
-        st.session_state.incident_data,
-        column_config={
-            "Status": st.column_config.CheckboxColumn("Done?", default=False),
-            "Latitude": None, "Longitude": None,
-            "ID": st.column_config.NumberColumn("ID", width="small")
-        },
-        disabled=["ID", "Type", "Location"],
-        hide_index=True,
-        use_container_width=True
-    )
-    st.session_state.incident_data = edited_df
-
-    # Statistics
-    active_incidents = edited_df[edited_df['Status'] == False]
-    st.metric("⚠️ Active Emergencies", len(active_incidents))
-
-# --- RIGHT: MAP ---
-with col2:
-    st.subheader("📍 Live Geospatial View")
     
-    # Dynamic Map Center
-    if not active_incidents.empty:
-        center_lat = active_incidents['Latitude'].mean()
-        center_lon = active_incidents['Longitude'].mean()
-        zoom = 12
+    # If reading from CSV, we just show the table (Read Only)
+    # If in Manual Mode, we allow editing (Checkboxes)
+    if os.path.exists(DB_FILE):
+        # Reload latest data from CSV
+        try:
+            current_df = pd.read_csv(DB_FILE)
+            st.dataframe(current_df, use_container_width=True, hide_index=True)
+        except:
+            st.write("Waiting for data...")
     else:
-        center_lat, center_lon, zoom = 17.3850, 78.4867, 12
+        # Interactive Table for Judges
+        edited_df = st.data_editor(
+            st.session_state.incident_data,
+            column_config={
+                "Status": st.column_config.CheckboxColumn("Resolved?", default=False),
+                "Latitude": None, "Longitude": None
+            },
+            disabled=["ID", "Type", "Title", "Location"],
+            hide_index=True,
+            use_container_width=True
+        )
+        st.session_state.incident_data = edited_df
 
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom)
-
-    # Plot Markers
-    for index, row in edited_df.iterrows():
-        # Icons & Colors
-        if row['Type'] == 'Fire': color, icon = 'red', 'fire'
-        elif row['Type'] == 'Flood': color, icon = 'blue', 'water'
-        elif row['Type'] == 'Medical': color, icon = 'green', 'heart'
-        elif row['Type'] == 'Accident': color, icon = 'orange', 'car'
-        else: color, icon = 'gray', 'info-sign'
-
-        if row['Status']:
-            # Resolved Style
-            folium.CircleMarker(
-                [row['Latitude'], row['Longitude']], radius=5, color='gray', fill=True, fill_opacity=0.2,
-                popup=f"✅ RESOLVED: {row['Location']}"
-            ).add_to(m)
+with col2:
+    st.subheader("📍 Live Map")
+    
+    # Logic to handle empty data gracefully
+    if not st.session_state.incident_data.empty:
+        # If reading from file, use file data. If manual, use session state.
+        map_data = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else st.session_state.incident_data
+        
+        # Center Map
+        if not map_data.empty:
+            center_lat = map_data['Latitude'].mean()
+            center_lon = map_data['Longitude'].mean()
         else:
-            # Active Style
-            folium.Marker(
-                [row['Latitude'], row['Longitude']],
-                popup=f"🚨 {row['Type']}\n📍 {row['Location']}",
-                icon=folium.Icon(color=color, icon=icon, prefix='fa')
-            ).add_to(m)
+            center_lat, center_lon = 17.3850, 78.4867
+            
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=12)
 
-    st_folium(m, use_container_width=True, height=550)
+        for _, row in map_data.iterrows():
+            # Color Logic
+            if row['Type'] == 'Fire': color = 'red'
+            elif row['Type'] == 'Flood': color = 'blue'
+            elif row['Type'] == 'Medical': color = 'green'
+            elif row['Type'] == 'Accident': color = 'orange'
+            else: color = 'gray'
+
+            # Marker Logic
+            # If "Status" is True (Resolved), make it gray/transparent
+            # (Note: CSV might save 'Status' as string "True"/"False", so be careful)
+            is_resolved = str(row['Status']).lower() == 'true'
+            
+            if is_resolved:
+                folium.CircleMarker(
+                    [row['Latitude'], row['Longitude']], radius=5, color='gray', fill_opacity=0.2,
+                    popup=f"✅ RESOLVED: {row['Location']}"
+                ).add_to(m)
+            else:
+                folium.Marker(
+                    [row['Latitude'], row['Longitude']],
+                    popup=f"🚨 {row['Type']}\n📍 {row['Location']}",
+                    icon=folium.Icon(color=color, icon="info-sign")
+                ).add_to(m)
+        
+        st_folium(m, use_container_width=True, height=500)
+    else:
+        st.write("No active incidents.")
