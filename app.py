@@ -37,28 +37,43 @@ if os.path.exists(DB_FILE):
     time.sleep(1)
     st.rerun()
 
-# --- INTELLIGENCE LAYER ---
+# --- INTELLIGENCE LAYER (Improved) ---
 def process_report(raw_text):
-    geolocator = Nominatim(user_agent="resqnet_hybrid_v1")
+    # 1. Update User Agent to avoid timeouts
+    geolocator = Nominatim(user_agent="resqnet_hybrid_fix_v2")
+    
+    # 2. Expanded list of noise words to remove
     noise_words = ["reported", "massive", "huge", "severe", "major", "fire", "flood", 
-                   "accident", "medical", "near", "at", "in", "hyderabad", "breaking"]
+                   "accident", "medical", "near", "at", "in", "hyderabad", "breaking", 
+                   "emergency", "help", "please", "located", "area"]
     
     clean_text = raw_text.lower()
     for word in noise_words:
         clean_text = clean_text.replace(word, "")
-    clean_text = clean_text.strip().split(" ")[0]
+    
+    # 3. FIX: Don't split! Keep the whole string (e.g., "Jubilee Hills")
+    clean_text = clean_text.strip().replace("  ", " ")
+    
+    # Safety check: If text is too short (e.g., just " "), return None
+    if len(clean_text) < 3:
+        return None, None, None, None
     
     try:
+        # Search specifically in Hyderabad
         location = geolocator.geocode(f"{clean_text}, Hyderabad")
+        
         if location:
+            # Detect Type
             dtype = "General"
             if "fire" in raw_text.lower(): dtype = "Fire"
             elif "flood" in raw_text.lower(): dtype = "Flood"
             elif "accident" in raw_text.lower(): dtype = "Accident"
             elif "medical" in raw_text.lower(): dtype = "Medical"
+            
             return dtype, location.latitude, location.longitude, clean_text.title()
     except:
         return None, None, None, None
+        
     return None, None, None, None
 
 # --- SIDEBAR ---
@@ -163,3 +178,4 @@ with col2:
         st_folium(m, use_container_width=True, height=500)
     else:
         st.write("No active incidents.")
+
