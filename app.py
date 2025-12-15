@@ -71,6 +71,10 @@ def process_report(raw_text):
 # --- SIDEBAR: LIVE MONITORING CHANNEL ---
 with st.sidebar:
     st.header("📡 Live Monitoring Channel")
+    st.info("💡 **Try these examples:**\n"
+        "- 'Fire at Charminar'\n"
+        "- 'Flood in Hitech City'\n"
+        "- 'Accident near Gachibowli'")
     st.info("💡 Tip: You can now type full sentences!")
     
     # The Input for the Agent
